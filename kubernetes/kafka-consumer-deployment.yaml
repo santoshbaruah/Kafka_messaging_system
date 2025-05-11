@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-consumer
+  namespace: kafka
+  labels:
+    app: kafka-consumer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kafka-consumer
+  template:
+    metadata:
+      labels:
+        app: kafka-consumer
+    spec:
+      containers:
+      - name: consumer
+        image: your-registry/kafka-consumer:latest # Update this with your image
+        imagePullPolicy: Always
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-service:9092"
+        - name: KAFKA_TOPIC
+          value: "posts"
+        - name: KAFKA_GROUP_ID
+          value: "consumer-group"
+        - name: KAFKA_AUTO_OFFSET_RESET
+          value: "earliest"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - ps -ef | grep python | grep consumer.py
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - ps -ef | grep python | grep consumer.py
+          initialDelaySeconds: 5
+          periodSeconds: 5

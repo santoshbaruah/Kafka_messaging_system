@@ -1,0 +1,147 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-consumer-code
+  namespace: kafka
+data:
+  consumer.py: |
+    import json
+    import logging
+    import os
+    from kafka import KafkaConsumer
+    import time
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+
+    # Safe deserializer function that handles JSON parsing errors
+    def safe_json_deserializer(m):
+        if m is None:
+            return None
+            
+        try:
+            decoded = m.decode('utf-8')
+            logger.debug(f"Attempting to parse: {decoded[:100]}...")
+            return json.loads(decoded)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to decode JSON message: {e}. Treating as raw text.")
+            return {"error": "Invalid JSON format", "raw_message": m.decode('utf-8', errors='replace')}
+        except Exception as e:
+            logger.error(f"Unexpected error deserializing message: {str(e)}")
+            return {"error": str(e), "raw_message": "Could not decode message"}
+
+    def main():
+        # Add a small delay on startup to ensure Kafka is ready
+        time.sleep(5)
+        
+        # Get configuration from environment
+        bootstrap_servers = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'kafka-service:9092')
+        topic = os.environ.get('KAFKA_TOPIC', 'posts')
+        group_id = os.environ.get('KAFKA_GROUP_ID', 'kafka-consumer-group')
+        
+        logger.info(f"Starting Kafka consumer for topic '{topic}' with bootstrap servers: {bootstrap_servers}")
+        
+        # Initialize the consumer with the safe deserializer
+        consumer = KafkaConsumer(
+            topic,
+            bootstrap_servers=[bootstrap_servers],
+            auto_offset_reset='earliest',
+            group_id=group_id,
+            value_deserializer=safe_json_deserializer
+        )
+        
+        logger.info("Consumer initialized successfully. Waiting for messages...")
+        
+        try:
+            for message in consumer:
+                # Log the received message
+                logger.info(f"Received message: Topic={message.topic}, Partition={message.partition}, Offset={message.offset}")
+                
+                # Process the message value
+                value = message.value
+                if isinstance(value, dict) and "error" in value:
+                    # This is a message that couldn't be parsed as JSON
+                    logger.warning(f"Processing raw text message: {value.get('raw_message')[:50]}...")
+                    # Add your business logic for handling non-JSON messages
+                else:
+                    # Process valid JSON message
+                    logger.info(f"Processing JSON message: {value}")
+                    # Add your existing business logic here
+        except KeyboardInterrupt:
+            logger.info("Consumer stopped by user")
+        except Exception as e:
+            logger.error(f"Unexpected error in message processing loop: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            consumer.close()
+            logger.info("Consumer closed")
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-consumer
+  namespace: kafka
+  labels:
+    app: kafka-consumer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kafka-consumer
+  template:
+    metadata:
+      labels:
+        app: kafka-consumer
+    spec:
+      volumes:
+      - name: consumer-code
+        configMap:
+          name: kafka-consumer-code
+      containers:
+      - name: consumer
+        image: your-registry/kafka-consumer:latest
+        imagePullPolicy: IfNotPresent # Changed from Always to avoid ImagePullBackOff
+        volumeMounts:
+        - name: consumer-code
+          mountPath: /app/consumer.py
+          subPath: consumer.py
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-service:9092"
+        - name: KAFKA_TOPIC
+          value: "posts"
+        - name: KAFKA_GROUP_ID
+          value: "kafka-consumer-group"
+        - name: KAFKA_AUTO_OFFSET_RESET
+          value: "earliest"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - ps -ef | grep python | grep consumer.py
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - ps -ef | grep python | grep consumer.py
+          initialDelaySeconds: 5
+          periodSeconds: 5

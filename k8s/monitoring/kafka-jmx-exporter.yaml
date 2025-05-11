@@ -1,0 +1,81 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-jmx-exporter-config
+  namespace: kafka
+data:
+  config.yml: |
+    startDelaySeconds: 60
+    lowercaseOutputName: true
+    jmxUrl: service:jmx:rmi:///jndi/rmi://kafka-0.kafka-service.kafka.svc.cluster.local:9999/jmxrmi
+    rules:
+    - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+      name: kafka_server_$1_$2
+      type: GAUGE
+      labels:
+        clientId: "$3"
+        topic: "$4"
+        partition: "$5"
+    - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value
+      name: kafka_server_$1_$2
+      type: GAUGE
+      labels:
+        clientId: "$3"
+        broker: "$4:$5"
+    - pattern: kafka.server<type=(.+), name=(.+)><>Value
+      name: kafka_server_$1_$2
+      type: GAUGE
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-jmx-exporter
+  namespace: kafka
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-jmx-exporter
+  template:
+    metadata:
+      labels:
+        app: kafka-jmx-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5556"
+    spec:
+      containers:
+      - name: jmx-exporter
+        image: bitnami/jmx-exporter:0.17.2
+        ports:
+        - containerPort: 5556
+        args:
+        - "5556"
+        - "/etc/jmx-exporter/config.yml"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/jmx-exporter
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: config-volume
+        configMap:
+          name: kafka-jmx-exporter-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-jmx-exporter
+  namespace: kafka
+spec:
+  selector:
+    app: kafka-jmx-exporter
+  ports:
+  - port: 5556
+    targetPort: 5556
+  type: ClusterIP

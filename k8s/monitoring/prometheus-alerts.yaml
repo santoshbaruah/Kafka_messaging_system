@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: kafka
+data:
+  kafka_alerts.yml: |-
+    groups:
+    - name: kafka_alerts
+      rules:
+      - alert: KafkaUnderReplicatedPartitions
+        expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka under replicated partitions (instance {{ $labels.instance }})"
+          description: "Kafka has under replicated partitions\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+      - alert: KafkaOfflinePartitions
+        expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka offline partitions (instance {{ $labels.instance }})"
+          description: "Kafka has offline partitions\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+      - alert: KafkaHighLag
+        expr: kafka_server_replicafetchermanager_maxlag > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka high lag (instance {{ $labels.instance }})"
+          description: "Kafka consumer group lag is high\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+      - alert: KafkaBrokerDown
+        expr: up{job="kafka"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka broker down (instance {{ $labels.instance }})"
+          description: "Kafka broker is down\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+      - alert: KafkaDLQMessages
+        expr: sum(rate(kafka_topic_partition_current_offset{topic=~".*\.dlq"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka DLQ messages detected"
+          description: "Messages are being sent to Dead Letter Queue\n  VALUE = {{ $value }} messages/sec\n  LABELS = {{ $labels }}"
+
+      - alert: KafkaConsumerErrors
+        expr: sum(rate(kafka_consumer_fetch_manager_fetch_error_total[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer errors detected"
+          description: "Consumers are experiencing errors\n  VALUE = {{ $value }} errors/sec\n  LABELS = {{ $labels }}"
+
+      - alert: KafkaHighMessageFailureRate
+        expr: sum(rate(kafka_topic_partition_current_offset{topic=~".*\.dlq"}[5m])) / sum(rate(kafka_topic_partition_current_offset{topic!~".*\.dlq"}[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka high message failure rate"
+          description: "More than 1% of messages are failing\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"

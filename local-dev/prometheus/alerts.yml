@@ -1,0 +1,56 @@
+groups:
+- name: kafka_alerts
+  rules:
+  - alert: KafkaUnderReplicatedPartitions
+    expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Kafka under replicated partitions (instance {{ $labels.instance }})"
+      description: "Kafka has under replicated partitions\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+  - alert: KafkaOfflinePartitions
+    expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Kafka offline partitions (instance {{ $labels.instance }})"
+      description: "Kafka has offline partitions\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+  - alert: KafkaBrokerDown
+    expr: up{job="kafka"} == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "Kafka broker down (instance {{ $labels.instance }})"
+      description: "Kafka broker is down\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+  - alert: KafkaDLQMessages
+    expr: sum(rate(kafka_topic_partition_current_offset{topic=~".*\\.dlq"}[5m])) > 0
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Kafka DLQ messages detected"
+      description: "Messages are being sent to Dead Letter Queue\n  VALUE = {{ $value }} messages/sec\n  LABELS = {{ $labels }}"
+
+  - alert: KafkaConsumerLag
+    expr: sum(kafka_consumergroup_lag) by (consumergroup) > 1000
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Kafka consumer lag (instance {{ $labels.instance }})"
+      description: "Kafka consumer group {{ $labels.consumergroup }} lag is high\n  VALUE = {{ $value }}\n  LABELS = {{ $labels }}"
+
+  - alert: KafkaConsumerProcessingErrors
+    expr: rate(kafka_consumer_processing_errors_total[5m]) > 0
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "Kafka consumer processing errors"
+      description: "Kafka consumer is experiencing processing errors\n  VALUE = {{ $value }} errors/sec\n  LABELS = {{ $labels }}"

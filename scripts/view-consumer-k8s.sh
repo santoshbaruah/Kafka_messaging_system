@@ -1,0 +1,1 @@
+/Users/santoshbaruah/Developer/DevOps-Challenge-main/scripts/view-kafka-messages.sh

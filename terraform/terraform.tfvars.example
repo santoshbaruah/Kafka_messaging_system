@@ -1,0 +1,10 @@
+# Example terraform.tfvars file
+# Copy this file to terraform.tfvars and update with your own values
+
+# Kafka credentials
+kafka_admin_password     = "admin-secret"
+kafka_producer_password  = "producer-secret"
+kafka_consumer_password  = "consumer-secret"
+
+# Grafana credentials
+grafana_admin_password   = "admin@Grafana123!"

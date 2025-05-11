@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-mm2-config
+  namespace: kafka
+data:
+  mm2.properties: |
+    # Kafka Mirror Maker 2 configuration
+    
+    # Clusters configuration
+    clusters=source,target
+    source.bootstrap.servers=kafka-0.kafka-service.kafka.svc.cluster.local:9092
+    target.bootstrap.servers=kafka-backup-0.kafka-backup-service.kafka-backup.svc.cluster.local:9092
+    
+    # Source->Target replication configuration
+    source->target.enabled=true
+    source->target.topics=.*
+    source->target.groups=.*
+    
+    # Connector configuration
+    source->target.emit.heartbeats.enabled=true
+    source->target.emit.checkpoints.enabled=true
+    
+    # Replication policy
+    source->target.replication.policy.class=org.apache.kafka.connect.mirror.IdentityReplicationPolicy
+    
+    # Sync topic configurations
+    source->target.config.sync.enabled=true
+    
+    # Sync topic ACLs
+    source->target.acl.sync.enabled=true
+    
+    # Refresh topics and configurations
+    refresh.topics.enabled=true
+    refresh.topics.interval.seconds=10
+    refresh.groups.enabled=true
+    refresh.groups.interval.seconds=10
+    
+    # Heartbeats
+    heartbeats.topic.replication.factor=3
+    
+    # Checkpoints
+    checkpoints.topic.replication.factor=3
+    
+    # Offset syncs
+    offset-syncs.topic.replication.factor=3
+    
+    # Connector source cluster
+    source->target.connector.client.config.override.policy=All
+    
+    # Connector tasks
+    tasks.max=4
+    
+    # Exactly once semantics
+    source->target.exactly.once.source.support=enabled
+    
+    # Replication factor for newly created topics
+    replication.factor=3
+    
+    # Producer configuration
+    producer.client.id=mm2-source-target
+    producer.compression.type=lz4
+    producer.acks=all
+    producer.enable.idempotence=true
+    
+    # Consumer configuration
+    consumer.client.id=mm2-target-source
+    consumer.auto.offset.reset=earliest
+    consumer.group.id=mm2-group
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-mirror-maker
+  namespace: kafka
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kafka-mirror-maker
+  template:
+    metadata:
+      labels:
+        app: kafka-mirror-maker
+    spec:
+      containers:
+      - name: mirror-maker
+        image: confluentinc/cp-kafka-connect:7.3.2
+        command:
+        - /bin/bash
+        - -c
+        - |
+          echo "Starting Mirror Maker 2..."
+          /usr/bin/connect-mirror-maker /etc/kafka/mm2.properties
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: mm2-config
+          mountPath: /etc/kafka/mm2.properties
+          subPath: mm2.properties
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - ps -ef | grep -v grep | grep "connect-mirror-maker"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - ps -ef | grep -v grep | grep "connect-mirror-maker"
+          initialDelaySeconds: 15
+          periodSeconds: 5
+      volumes:
+      - name: mm2-config
+        configMap:
+          name: kafka-mm2-config

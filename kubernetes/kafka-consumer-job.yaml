@@ -1,0 +1,174 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consumer-code-fixed
+  namespace: kafka
+data:
+  consumer.py: |
+    import json
+    import logging
+    import os
+    import time
+    from kafka import KafkaConsumer
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+
+    # Safe deserializer function that handles JSON parsing errors
+    def safe_json_deserializer(m):
+        if m is None:
+            return None
+            
+        try:
+            decoded = m.decode('utf-8')
+            logger.debug(f"Attempting to parse: {decoded[:100]}...")
+            return json.loads(decoded)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to decode JSON message: {e}. Raw message: {m[:50]}...")
+            # Return a default object instead of crashing
+            return {"error": "Invalid JSON format", "raw_message": m.decode('utf-8', errors='replace')}
+        except Exception as e:
+            logger.error(f"Unexpected error deserializing message: {str(e)}")
+            return {"error": str(e), "raw_message": "Could not decode message"}
+
+    def main():
+        # Wait for Kafka to be ready
+        logger.info("Starting Kafka consumer...")
+        time.sleep(5)
+        
+        # Get configuration from environment
+        bootstrap_servers = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'kafka-service:9092')
+        topic = os.environ.get('KAFKA_TOPIC', 'posts')
+        group_id = os.environ.get('KAFKA_GROUP_ID', 'kafka-consumer-group')
+        
+        logger.info(f"Connecting to Kafka at {bootstrap_servers}")
+        logger.info(f"Subscribing to topic: {topic}")
+        
+        # Initialize the consumer with the safe deserializer
+        consumer = KafkaConsumer(
+            topic,
+            bootstrap_servers=[bootstrap_servers],
+            auto_offset_reset='earliest',
+            group_id=group_id,
+            value_deserializer=safe_json_deserializer
+        )
+        
+        logger.info("Consumer initialized. Waiting for messages...")
+        
+        try:
+            for message in consumer:
+                # Log the received message
+                logger.info(f"Received message: Topic={message.topic}, Partition={message.partition}, Offset={message.offset}")
+                
+                # Process the message value
+                value = message.value
+                if isinstance(value, dict) and "error" in value:
+                    # This is a message that couldn't be parsed as JSON
+                    logger.warning(f"Processing raw text message: {value.get('raw_message')[:50]}...")
+                else:
+                    # Process valid JSON message
+                    logger.info(f"Processing JSON message: {value}")
+        except KeyboardInterrupt:
+            logger.info("Consumer stopped by user")
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            consumer.close()
+            logger.info("Consumer closed")
+
+    if __name__ == "__main__":
+        main()
+  requirements.txt: |
+    kafka-python==2.0.2
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-consumer-job
+  namespace: kafka
+spec:
+  template:
+    metadata:
+      labels:
+        app: kafka-consumer-job
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: consumer
+        image: python:3.8-slim
+        command: [ "/bin/bash", "-c" ]
+        args:
+        - |
+          pip install -r /app/requirements.txt &&
+          python /app/consumer.py
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-service:9092"
+        - name: KAFKA_TOPIC
+          value: "posts"
+        - name: KAFKA_GROUP_ID
+          value: "kafka-consumer-job-group"
+        - name: KAFKA_AUTO_OFFSET_RESET
+          value: "earliest"
+        volumeMounts:
+        - name: consumer-code
+          mountPath: /app
+      volumes:
+      - name: consumer-code
+        configMap:
+          name: consumer-code-fixed
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-consumer-fixed
+  namespace: kafka
+  labels:
+    app: kafka-consumer-fixed
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-consumer-fixed
+  template:
+    metadata:
+      labels:
+        app: kafka-consumer-fixed
+    spec:
+      containers:
+      - name: consumer
+        image: python:3.8-slim
+        command: [ "/bin/bash", "-c" ]
+        args:
+        - |
+          pip install -r /app/requirements.txt &&
+          python /app/consumer.py
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka-service:9092"
+        - name: KAFKA_TOPIC
+          value: "posts"
+        - name: KAFKA_GROUP_ID
+          value: "kafka-consumer-fixed-group"
+        - name: KAFKA_AUTO_OFFSET_RESET
+          value: "earliest"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        volumeMounts:
+        - name: consumer-code
+          mountPath: /app
+      volumes:
+      - name: consumer-code
+        configMap:
+          name: consumer-code-fixed

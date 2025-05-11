@@ -1,0 +1,199 @@
+# Docker Compose configuration for Kafka cluster
+# Note: version key is obsolete in Compose V2
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka-1:
+    image: confluentinc/cp-kafka:7.3.2
+    hostname: kafka-1
+    container_name: kafka-1
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1  # Set to 1 for local testing
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1  # Set to 1 for local testing
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  kafka-2:
+    image: confluentinc/cp-kafka:7.3.2
+    hostname: kafka-2
+    container_name: kafka-2
+    depends_on:
+      - zookeeper
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1  # Set to 1 for local testing
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1  # Set to 1 for local testing
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.3.2
+    hostname: kafka-3
+    container_name: kafka-3
+    depends_on:
+      - zookeeper
+    ports:
+      - "9095:9095"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9092,PLAINTEXT_HOST://localhost:9095
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1  # Set to 1 for local testing
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1  # Set to 1 for local testing
+      KAFKA_MIN_INSYNC_REPLICAS: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.3.2
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka-1:9092,kafka-2:9092,kafka-3:9092'
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka-setup
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    command:
+      - /bin/bash
+      - -c
+      - |
+        echo "Waiting for Kafka to be ready..."
+        sleep 30
+
+        # Create the posts topic with 8 partitions and replication factor of 1 for local testing
+        kafka-topics --create --if-not-exists \
+          --bootstrap-server kafka-1:9092 \
+          --topic posts \
+          --partitions 8 \
+          --replication-factor 1 \
+          --config min.insync.replicas=1 \
+          --config retention.ms=604800000 \
+          --config segment.bytes=1073741824 \
+          --config cleanup.policy=delete \
+          --config max.message.bytes=1000000 \
+          --config flush.messages=1 \
+          --config flush.ms=1000
+
+        echo "Topic 'posts' created successfully"
+    restart: on-failure
+
+  producer:
+    build:
+      context: ../producer
+      dockerfile: Dockerfile.improved
+    container_name: kafka-producer
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
+      schema-registry:
+        condition: service_started
+    volumes:
+      - ../producer/producer.py:/app/producer.py
+    environment:
+      KAFKA_BROKER_URL: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      KAFKA_TOPIC: posts
+      KAFKA_ACKS: all
+      KAFKA_RETRIES: 3
+      KAFKA_LINGER_MS: 5
+      MESSAGE_COUNT: 100
+      MESSAGE_INTERVAL: 5.0
+    restart: on-failure
+
+  kcat:
+    image: edenhill/kcat:1.7.1
+    container_name: kcat
+    depends_on:
+      - kafka-setup
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["echo 'Kcat utility is ready for use'; sleep infinity"]
+
+  consumer:
+    build:
+      context: ../consumer
+      dockerfile: Dockerfile.improved
+    container_name: kafka-consumer
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
+      schema-registry:
+        condition: service_started
+    volumes:
+      - ../consumer/consumer.py:/app/consumer.py
+    environment:
+      KAFKA_BROKER_URL: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      KAFKA_TOPIC: posts
+      KAFKA_CONSUMER_GROUP_ID: consumer-group-1
+      KAFKA_AUTO_OFFSET_RESET: earliest
+    restart: on-failure

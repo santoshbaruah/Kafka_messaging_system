@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-dlq-creator
+  namespace: kafka
+spec:
+  template:
+    metadata: {}
+    spec:
+      containers:
+      - name: kafka-topic-creator
+        image: confluentinc/cp-kafka:7.3.2
+        command: [ "/bin/bash", "-c" ]
+        args:
+        - |
+          # Wait for Kafka to be ready
+          echo "Waiting for Kafka to be ready..."
+          sleep 30
+
+          # Create the dead letter queue topic
+          kafka-topics --create --if-not-exists \
+            --bootstrap-server kafka-service:9092 \
+            --topic posts.dlq \
+            --partitions 3 \
+            --replication-factor 1 \
+            --config retention.ms=1209600000 \
+            --config cleanup.policy=compact,delete
+
+          echo "Topic 'posts.dlq' created successfully"
+      restartPolicy: Never
+  backoffLimit: 3

@@ -1,0 +1,369 @@
+# Enhanced Docker Compose configuration for Kafka cluster
+# This version includes additional development tools and monitoring
+
+services:
+zookeeper:
+image: confluentinc/cp-zookeeper:7.3.2
+platform: linux/arm64
+hostname: zookeeper
+container_name: zookeeper
+ports:
+- "2181:2181"
+environment:
+ZOOKEEPER_CLIENT_PORT: 2181
+ZOOKEEPER_TICK_TIME: 2000
+healthcheck:
+test: echo srvr | nc zookeeper 2181 || exit 1
+interval: 10s
+timeout: 5s
+retries: 3
+start_period: 10s
+volumes:
+- zookeeper-data:/var/lib/zookeeper/data
+- zookeeper-logs:/var/lib/zookeeper/log
+
+kafka-1:
+image: confluentinc/cp-kafka:${KAFKA_VERSION:-7.3.2}
+platform: linux/arm64
+hostname: kafka-1
+container_name: kafka-1
+depends_on:
+zookeeper:
+condition: service_healthy
+ports:
+- "9092:9092"
+- "9093:9093"
+- "9991:9991"
+environment:
+KAFKA_BROKER_ID: 1
+KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092,PLAINTEXT_HOST://localhost:9093
+KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+KAFKA_MIN_INSYNC_REPLICAS: 2
+KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+KAFKA_JMX_PORT: 9991
+KAFKA_JMX_HOSTNAME: kafka-1
+KAFKA_OPTS: -javaagent:/etc/jmx-exporter/jmx_prometheus_javaagent-0.16.1.jar=5556:/etc/jmx-exporter/kafka-jmx-exporter.yml
+healthcheck:
+test: nc -z kafka-1 9092 || exit 1
+interval: 10s
+timeout: 5s
+retries: 3
+start_period: 30s
+volumes:
+- kafka-1-data:/var/lib/kafka/data
+- ./jmx-exporter:/etc/jmx-exporter
+
+kafka-2:
+image: confluentinc/cp-kafka:${KAFKA_VERSION:-7.3.2}
+platform: linux/arm64
+hostname: kafka-2
+container_name: kafka-2
+depends_on:
+zookeeper:
+condition: service_healthy
+ports:
+- "9094:9092"
+- "9992:9992"
+environment:
+KAFKA_BROKER_ID: 2
+KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9092,PLAINTEXT_HOST://localhost:9094
+KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+KAFKA_MIN_INSYNC_REPLICAS: 2
+KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+KAFKA_JMX_PORT: 9992
+KAFKA_JMX_HOSTNAME: kafka-2
+KAFKA_OPTS: -javaagent:/etc/jmx-exporter/jmx_prometheus_javaagent-0.16.1.jar=5556:/etc/jmx-exporter/kafka-jmx-exporter.yml
+healthcheck:
+test: nc -z kafka-2 9092 || exit 1
+interval: 10s
+timeout: 5s
+retries: 3
+start_period: 30s
+volumes:
+- kafka-2-data:/var/lib/kafka/data
+- ./jmx-exporter:/etc/jmx-exporter
+
+kafka-3:
+image: confluentinc/cp-kafka:${KAFKA_VERSION:-7.3.2}
+platform: linux/arm64
+hostname: kafka-3
+container_name: kafka-3
+depends_on:
+zookeeper:
+condition: service_healthy
+ports:
+- "9095:9092"
+- "9993:9993"
+environment:
+KAFKA_BROKER_ID: 3
+KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9092,PLAINTEXT_HOST://localhost:9095
+KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+KAFKA_MIN_INSYNC_REPLICAS: 2
+KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+KAFKA_JMX_PORT: 9993
+KAFKA_JMX_HOSTNAME: kafka-3
+KAFKA_OPTS: -javaagent:/etc/jmx-exporter/jmx_prometheus_javaagent-0.16.1.jar=5556:/etc/jmx-exporter/kafka-jmx-exporter.yml
+healthcheck:
+test: nc -z kafka-3 9092 || exit 1
+interval: 10s
+timeout: 5s
+retries: 3
+start_period: 30s
+volumes:
+- kafka-3-data:/var/lib/kafka/data
+- ./jmx-exporter:/etc/jmx-exporter
+
+kafka-setup:
+image: confluentinc/cp-kafka:${KAFKA_VERSION:-7.3.2}
+platform: linux/arm64
+container_name: kafka-setup
+depends_on:
+kafka-1:
+condition: service_healthy
+kafka-2:
+condition: service_healthy
+kafka-3:
+condition: service_healthy
+command: >
+bash -c "
+echo 'Waiting for Kafka to be ready...'
+sleep 10
+
+echo 'Creating topics...'
+kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic posts --partitions 6 --replication-factor 3 --config min.insync.replicas=2
+kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic posts.dlq --partitions 6 --replication-factor 3 --config min.insync.replicas=2
+
+echo 'Topics created successfully'
+
+echo 'Creating ACLs...'
+kafka-acls --bootstrap-server kafka-1:9092 --add --allow-principal User:producer --operation Write --topic posts
+kafka-acls --bootstrap-server kafka-1:9092 --add --allow-principal User:consumer --operation Read --topic posts --group consumer-group
+kafka-acls --bootstrap-server kafka-1:9092 --add --allow-principal User:consumer --operation Write --topic posts.dlq
+
+echo 'ACLs created successfully'
+"
+restart: on-failure
+
+schema-registry:
+image: confluentinc/cp-schema-registry:7.3.2
+platform: linux/arm64
+hostname: schema-registry
+container_name: schema-registry
+depends_on:
+kafka-1:
+condition: service_healthy
+ports:
+- "8081:8081"
+environment:
+SCHEMA_REGISTRY_HOST_NAME: schema-registry
+SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka-1:9092,kafka-2:9092,kafka-3:9092'
+SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+healthcheck:
+test: curl --silent --fail http://localhost:8081/subjects || exit 1
+interval: 10s
+timeout: 5s
+retries: 3
+start_period: 30s
+
+kafka-manager:
+image: hlebalbau/kafka-manager:stable
+platform: linux/arm64
+container_name: kafka-manager
+ports:
+- "9000:9000"
+environment:
+ZK_HOSTS: "zookeeper:2181"
+APPLICATION_SECRET: "random-secret"
+depends_on:
+zookeeper:
+condition: service_healthy
+healthcheck:
+test: curl --silent --fail http://localhost:9000 || exit 1
+interval: 10s
+timeout: 5s
+retries: 3
+start_period: 30s
+
+schema-registry-ui:
+image: landoop/schema-registry-ui:latest
+platform: linux/arm64
+container_name: schema-registry-ui
+ports:
+- "8001:8000"
+environment:
+SCHEMAREGISTRY_URL: http://schema-registry:8081
+PROXY: "true"
+depends_on:
+schema-registry:
+condition: service_healthy
+
+kafka-topics-ui:
+image: landoop/kafka-topics-ui:latest
+platform: linux/arm64
+container_name: kafka-topics-ui
+ports:
+- "8002:8000"
+environment:
+KAFKA_REST_PROXY_URL: http://kafka-rest:8082
+PROXY: "true"
+depends_on:
+- kafka-rest
+
+kafka-rest:
+image: confluentinc/cp-kafka-rest:7.3.2
+platform: linux/arm64
+container_name: kafka-rest
+ports:
+- "8082:8082"
+environment:
+KAFKA_REST_HOST_NAME: kafka-rest
+KAFKA_REST_BOOTSTRAP_SERVERS: 'kafka-1:9092,kafka-2:9092,kafka-3:9092'
+KAFKA_REST_LISTENERS: http://0.0.0.0:8082
+KAFKA_REST_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+depends_on:
+kafka-1:
+condition: service_healthy
+schema-registry:
+condition: service_healthy
+
+prometheus:
+image: prom/prometheus:v2.42.0
+platform: linux/arm64
+container_name: prometheus
+ports:
+- "9090:9090"
+volumes:
+- ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+- ./prometheus/alerts.yml:/etc/prometheus/alerts.yml
+- prometheus-data:/prometheus
+command:
+- '--config.file=/etc/prometheus/prometheus.yml'
+- '--storage.tsdb.path=/prometheus'
+- '--web.console.libraries=/usr/share/prometheus/console_libraries'
+- '--web.console.templates=/usr/share/prometheus/consoles'
+- '--web.enable-lifecycle'
+healthcheck:
+test: wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1
+interval: 10s
+timeout: 5s
+retries: 3
+start_period: 30s
+
+grafana:
+image: grafana/grafana:9.4.7
+platform: linux/arm64
+container_name: grafana
+ports:
+- "3000:3000"
+environment:
+GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin123}
+GF_USERS_ALLOW_SIGN_UP: "false"
+volumes:
+- ./grafana/provisioning:/etc/grafana/provisioning
+- ./grafana/dashboards:/var/lib/grafana/dashboards
+- grafana-data:/var/lib/grafana
+depends_on:
+prometheus:
+condition: service_healthy
+healthcheck:
+test: wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+interval: 10s
+timeout: 5s
+retries: 3
+start_period: 30s
+
+producer:
+build:
+context: ../producer
+dockerfile: Dockerfile.improved
+container_name: kafka-producer
+depends_on:
+kafka-1:
+condition: service_healthy
+kafka-2:
+condition: service_healthy
+kafka-3:
+condition: service_healthy
+kafka-setup:
+condition: service_completed_successfully
+schema-registry:
+condition: service_healthy
+volumes:
+- ../producer:/app
+environment:
+KAFKA_BROKER_URL: kafka-1:9092,kafka-2:9092,kafka-3:9092
+KAFKA_TOPIC: ${KAFKA_TOPIC:-posts}
+KAFKA_ACKS: all
+KAFKA_RETRIES: 3
+KAFKA_LINGER_MS: 5
+MESSAGE_COUNT: ${MESSAGE_COUNT:-100}
+MESSAGE_INTERVAL: ${MESSAGE_INTERVAL:-5.0}
+PYTHONUNBUFFERED: 1
+restart: on-failure
+command: python -u producer.py
+
+consumer:
+build:
+context: ../consumer
+dockerfile: Dockerfile.fixed
+container_name: kafka-consumer
+depends_on:
+kafka-1:
+condition: service_healthy
+kafka-2:
+condition: service_healthy
+kafka-3:
+condition: service_healthy
+kafka-setup:
+condition: service_completed_successfully
+schema-registry:
+condition: service_healthy
+ports:
+- "8000:8000"
+volumes:
+- ../consumer:/app
+environment:
+KAFKA_BROKER_URL: kafka-1:9092,kafka-2:9092,kafka-3:9092
+KAFKA_TOPIC: ${KAFKA_TOPIC:-posts}
+KAFKA_DLQ_TOPIC: ${KAFKA_DLQ_TOPIC:-posts.dlq}
+KAFKA_CONSUMER_GROUP_ID: consumer-group-1
+KAFKA_AUTO_OFFSET_RESET: earliest
+MAX_RETRIES: ${MAX_RETRIES:-3}
+PYTHONUNBUFFERED: 1
+METRICS_PORT: 8000
+restart: on-failure
+command: python -u consumer.py
+
+kcat:
+image: edenhill/kcat:1.7.1
+platform: linux/arm64
+container_name: kcat
+depends_on:
+- kafka-setup
+entrypoint: ["/bin/sh", "-c"]
+command: ["echo 'Kcat utility is ready for use'; sleep infinity"]
+
+volumes:
+zookeeper-data:
+zookeeper-logs:
+kafka-1-data:
+kafka-2-data:
+kafka-3-data:
+prometheus-data:
+grafana-data:
