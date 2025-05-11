@@ -475,19 +475,6 @@ Access Grafana at [http://localhost:3000](http://localhost:3000) with:
 - Username: `admin`
 - Password: `admin123`
 
-## Directory Structure
-
-text
-├── consumer/                 # Consumer application
-│   ├── consumer.py           # Consumer code with DLQ support
-│   ├── circuit_breaker.py    # Circuit breaker implementation
-│   ├── metrics_exporter.py   # Custom metrics exporter
-│   ├── Dockerfile            # Standard Dockerfile
-│   ├── Dockerfile.fixed      # Fixed version with basic improvements
-│   └── Dockerfile.improved   # Optimized version with security enhancements
-├── producer/                 # Producer application
-│   ├── producer.py           # Producermake enhanced-local-dev
-
 The enhanced environment includes:
 
 - Kafka Manager: `http://localhost:9000`
